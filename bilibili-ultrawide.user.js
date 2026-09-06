@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.3.2
+// @version      1.4.0
 // @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流独占整行；播放页放大播放器并把评论区搬到右栏（顶掉弹幕列表和推荐列表）。
 // @author       zhangwenqiang0214
 // @license      MIT
@@ -71,9 +71,14 @@
     #app:has(> .popular-container),
     #app:has(> [class^="bili-dyn-home"]) { max-width: none !important; }
 
-    ${FEED} .bili-header, ${FEED} .bili-header__bar, ${FEED} .header-channel,
-    ${CHAN} .bili-header, ${CHAN} .bili-header__bar, ${CHAN} .header-channel,
-    ${POP}  .bili-header, ${POP}  .bili-header__bar, ${POP}  .header-channel {
+    /* 顶栏：只要页面上有这个顶栏就拉满，不按页面类型限定 —— 播放页、动态页、搜索页等都吃这条。
+       #app:has(> #biliMainHeader) 是给播放页解外层 2560px 上限用的；
+       search.bilibili.com 实测顶栏拉满、页面内容完全不受影响（它的 #app 直接子节点不是 #biliMainHeader）。 */
+    #app:has(> #biliMainHeader),
+    #biliMainHeader,
+    .bili-header,
+    .bili-header__bar,
+    .header-channel {
       max-width: none !important;
     }
 
