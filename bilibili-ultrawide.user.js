@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.6.0
+// @version      1.7.0
 // @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器、把评论区搬到右栏（顶掉弹幕列表和推荐列表），并把播放器钉住——滚评论时视频不动。
 // @author       zhangwenqiang0214
 // @license      MIT
@@ -39,6 +39,10 @@
   // 播放页：是否连「合集 / 分P 列表」也一起隐藏。
   // 默认 false —— 隐藏它会让多P视频和合集失去选集入口，弹幕列表和推荐列表则一律隐藏。
   const HIDE_VIDEO_POD = false;
+
+  // 首页要不要去掉这两样（纯口味问题，改成 false 就保留）
+  const HIDE_HOME_BANNER = true;  // 顶部那张大 banner 图，占 176px 高
+  const HIDE_HOME_SWIPE  = true;  // 信息流左上角那个 2×2 的大推荐位
 
   // 页面左右留白（px）。不要小于 60，否则首页右边的「换一换」按钮会顶出横向滚动条。
   const SIDE_PADDING = 60;
@@ -97,6 +101,26 @@
     ${FEED} .container.is-version8,
     ${FEED} .recommended-container_floor-aside .container {
       grid-template-columns: repeat(var(--uw-cols, 5), minmax(0, 1fr)) !important;
+    }
+    /* 顶部大 banner：压成 64px 的纯占位而不是 display:none —— 顶栏是 absolute 压在它上面的，
+       不留位置会叠到分区导航上。未滚动时顶栏背景本来是透明的、靠 banner 图垫底，所以补个实色。
+       实测文字对比度：暗色 12.48、浅色 17.58，都远高于 WCAG AA 的 4.5。 */
+    ${HIDE_HOME_BANNER ? `
+    ${FEED} .bili-header__banner {
+      height: 64px !important; min-height: 0 !important;
+      background: transparent !important; overflow: hidden !important;
+    }
+    ${FEED} .bili-header__banner > * { display: none !important; }
+    ${FEED} .bili-header__bar:not(.slide-down) { background-color: var(--bg1_float) !important; }` : ''}
+    ${HIDE_HOME_SWIPE ? `${FEED} .recommended-swipe { display: none !important; }` : ''}
+
+    /* 广告位被拦截插件掏空后留下的空壳，收掉让后面的视频补位。
+       判据用「没有封面图」，不能用「没有 .bili-video-card」—— 直播卡（floor-card）本来就没有它，会被误杀。
+       骨架屏和加载锚点单独排除，免得加载过程中布局乱跳。
+       实测 57 张真卡（普通卡/直播卡/bili-feed-card 直挂/骨架屏/加载锚点）全部有 picture 或 img，零误杀。 */
+    ${FEED} .feed2 .container > *:not(.recommended-swipe):not(.load-more-anchor):not(:has(picture, img)):not(:has([class*="skeleton"])),
+    ${CHAN} .channel-page__body .feed-cards > *:not(:has(picture, img)):not(:has([class*="skeleton"])) {
+      display: none !important;
     }
 
     /* ---------- 分区页（/c/tech/ 这类，和首页是两套完全不同的布局） ---------- */
