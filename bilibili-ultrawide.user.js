@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.5.0
-// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器并把评论区搬到右栏（顶掉弹幕列表和推荐列表）。
+// @version      1.6.0
+// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器、把评论区搬到右栏（顶掉弹幕列表和推荐列表），并把播放器钉住——滚评论时视频不动。
 // @author       zhangwenqiang0214
 // @license      MIT
 // @homepageURL  https://github.com/zhangwenqiang0214/bili-ultrawide
@@ -53,7 +53,10 @@
   const DYN_WIDE  = 1700; // 窗口宽于这个值，动态页才把侧栏收成顶部信息条
   const PLAY_WIDE = 2600; // 窗口宽于这个值，播放页才重排（窄屏保持 B站 原样更好用）
   const PLAY_GAP  = 24;   // 播放页 播放器和评论区之间的间距
-  const PLAY_RESERVE = 300; // 播放器上下要给顶栏/标题/工具栏留出的高度
+  const PLAY_TOP  = 64;   // 顶栏高度，左栏钉住时的吸顶位置
+  const PLAY_MIN_W = 640; // 播放器宽度下限，避免极端情况下被压得太小
+  // 左栏只留这三样，其余（简介/标签/广告/评论）搬到右栏 —— 左栏总高必须塞进一屏才钉得住
+  const PLAY_KEEP_LEFT = ['viewbox_report', 'playerWrap', 'arc_toolbar_report'];
 
   // 按「页面上有什么」判断页面类型，而不是靠网址白名单：
   // 这样分区页、热门页各个子标签页都自动覆盖，B站以后加新的同款页面也一样生效。
@@ -216,8 +219,15 @@
       padding-left: ${SIDE_PADDING}px !important; padding-right: ${SIDE_PADDING}px !important;
       justify-content: flex-start !important;
     }
+    /* 左栏钉住，滚评论时视频一动不动。
+       B站 自带的 .scroll-sticky 是 position:sticky 但不给 top，靠 JS 随滚动渐进上移，
+       视频会跟着上下挪 —— 这里直接把 top 写死（作者样式的 !important 优先于它的行内 style）。
+       前提是左栏总高塞得进一屏，所以简介/标签/广告都搬去了右栏，播放器高度也按剩余空间反算。 */
+    html.uw-play .video-container-v1 { align-items: flex-start !important; }
     html.uw-play .video-container-v1 > .left-container {
       width: var(--uw-player-w) !important; flex: 0 0 auto !important;
+      position: sticky !important; top: ${PLAY_TOP}px !important;
+      align-self: flex-start !important; height: fit-content !important;
     }
     /* 右栏原本 411px 固定宽、还带 pointer-events:none，放评论区必须都改掉 */
     html.uw-play .video-container-v1 > .right-container {
@@ -255,11 +265,15 @@
     // 动态页：宽窗口下侧栏已经搬到顶部，整行都归动态流；窄窗口下要扣掉左右侧栏
     set('--uw-dyn-main', (dynColumns() * DYN_CARD + (dynColumns() - 1) * DYN_GAP) + 'px');
 
-    // 播放页：播放器宽度取「视口高度放得下的最大 16:9」和「按比例分给播放器的宽度」中的小者，
-    // 保证整个播放器一屏能看完，剩下的宽度全归评论区。
-    set('--uw-player-w', Math.round(Math.min(
-      (window.innerHeight - PLAY_RESERVE) * 16 / 9,
-      avail * PLAYER_RATIO)) + 'px');
+    // 播放页：播放器宽度取「左栏还能塞下的最大 16:9」和「按比例分给播放器的宽度」中的小者。
+    // 前者是反算出来的 —— 左栏（标题+播放器+工具栏）必须整体塞进一屏，否则钉不住；
+    // 遇到两行标题的视频会自动把播放器缩一点，而不是撑破一屏。
+    const budget = leftColumnBudget();
+    const byHeight = budget !== null
+      ? (budget - 56) / 0.5625                       // 56px 是播放器控制条
+      : (window.innerHeight - 300) * 16 / 9;         // 元素还没渲染出来时的兜底
+    set('--uw-player-w', Math.max(PLAY_MIN_W,
+      Math.round(Math.min(byHeight, avail * PLAYER_RATIO))) + 'px');
   }
 
   /* ---------- 动态页瀑布流 ---------- */
@@ -385,13 +399,39 @@
   // 播放页需要一次 DOM 搬运：评论区在左栏里面，纯 CSS 没法把它挪到右栏
   // （试过 grid + display:contents，UP 卡片会把共享的表格行撑高、把播放器往下顶 377px）。
   let leftObserver = null;
-  function moveComments() {
+
+  const rightInner = () =>
+    document.querySelector('.video-container-v1 > .right-container .right-container-inner') ||
+    document.querySelector('.video-container-v1 > .right-container');
+
+  // 左栏里除了播放器以外的东西（标题、工具栏）占多高，剩下的就是播放器的高度预算
+  function leftColumnBudget() {
+    const lc = document.querySelector('.video-container-v1 > .left-container');
+    const pw = document.getElementById('playerWrap');
+    if (!lc || !pw) return null;
+    let other = 0;
+    for (const el of lc.children) {
+      if (el === pw) continue;
+      const r = el.getBoundingClientRect();
+      if (!r.height) continue;
+      const c = getComputedStyle(el);
+      other += r.height + parseFloat(c.marginTop) + parseFloat(c.marginBottom);
+    }
+    return document.documentElement.clientHeight - PLAY_TOP - other - 8;
+  }
+
+  let movedCount = 0;
+  function movePlayParts() {
+    const lc = document.querySelector('.video-container-v1 > .left-container');
+    const right = rightInner();
+    if (!lc || !right) return false;
+    movedCount = 0;
+    for (const el of [...lc.children]) {
+      if (!PLAY_KEEP_LEFT.includes(el.id)) { right.appendChild(el); movedCount++; }
+    }
     const app = document.getElementById('commentapp');
-    const right = document.querySelector('.video-container-v1 > .right-container .right-container-inner')
-               || document.querySelector('.video-container-v1 > .right-container');
-    if (!app || !right) return false;
-    if (app.parentElement !== right) right.appendChild(app);
-    return true;
+    if (app && app.parentElement === right) right.appendChild(app); // 评论排在右栏最后
+    return !!app;
   }
 
   function setupPlayPage() {
@@ -401,12 +441,15 @@
     // 关键：必须等 <bili-comments> 挂载之后再搬。
     // 搬得太早（document-start 一发现元素就搬）会被 Vue 重新渲染回左栏 —— 实测 50ms 搬走、615ms 就被塞回去了。
     if (!document.querySelector('bili-comments')) return false;
-    if (!moveComments()) return false;
+    if (!movePlayParts()) return false;
+    applyColumns(); // 左栏变矮了，重算播放器宽度
     // 保险：万一之后又被塞回左栏就再搬一次。只盯左栏的直接子节点增删，
     // 不用 subtree —— 播放页弹幕层每秒都在变，全量监听开销太大。
     const lc = document.querySelector('.video-container-v1 > .left-container');
     if (lc && !leftObserver) {
-      leftObserver = new MutationObserver(moveComments);
+      // 万一 Vue 之后又把这些节点塞回左栏，再搬一次并重算播放器宽度。
+      // 只在真的搬动过时才重算，避免和自己的 DOM 改动互相触发。
+      leftObserver = new MutationObserver(() => { if (movePlayParts() && movedCount) applyColumns(); });
       leftObserver.observe(lc, { childList: true });
     }
     return true;
