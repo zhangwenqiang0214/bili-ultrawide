@@ -58,6 +58,10 @@
   const PLAY_WIDE = 2600; // 窗口宽于这个值，播放页才重排（窄屏保持 B站 原样更好用）
   const PLAY_GAP  = 24;   // 播放页 播放器和评论区之间的间距
   const SRCH_GUTTER = 16;  // 搜索页每格左右各 8px 内边距
+  const SRCH_CARD   = 273; // 搜索页视频卡的原生宽度（B站 故意做得比首页小、一行塞 7 张，
+                           // 所以这里保持它原生大小、只加列数，不套首页那个 380）
+  const SRCH_WIDE_MIN = 2200; // 窄于这个值就不改列数 —— 原生响应式在 2200px 才排满 7 列，
+                              // 更窄时按原生走，免得反而变少
   const SRCH_WIDE   = 680; // 搜索页「用户/媒体」那种横向卡的原生宽度
   const PLAY_TOP  = 64;   // 顶栏高度，左栏钉住时的吸顶位置
   const PLAY_MIN_W = 640; // 播放器宽度下限，避免极端情况下被压得太小
@@ -172,17 +176,20 @@
       padding-left: ${SIDE_PADDING}px !important;
       padding-right: ${SIDE_PADDING}px !important;
     }
-    /* 视频卡栅格：原生每格写死 1/7（col_xl_1_7 → max-width:14.28%），改成按目标卡片宽度算列数 */
-    ${SRCH} .video-list.row > * {
-      flex: 0 0 calc(100% / var(--uw-srch-cols, 7)) !important;
-      max-width: calc(100% / var(--uw-srch-cols, 7)) !important;
-    }
-    /* 用户/媒体是横向卡（原生 1/3、约 669px 宽），容器变宽后必须重新分列，
-       否则每张会被拉到 1100px 以上、内容撑不满 */
-    ${SRCH} .media-list.row > *,
-    ${SRCH} .user-list.row > * {
-      flex: 0 0 calc(100% / var(--uw-srch-wide-cols, 3)) !important;
-      max-width: calc(100% / var(--uw-srch-wide-cols, 3)) !important;
+    /* 列数只在够宽时才改。原生响应式到 2200px 才排满 7 列（col_xl_1_7 → max-width:14.28%），
+       比这更窄的话按我们的算法反而会变少，所以让给原生。 */
+    @media (min-width: ${SRCH_WIDE_MIN}px) {
+      ${SRCH} .video-list.row > * {
+        flex: 0 0 calc(100% / var(--uw-srch-cols, 7)) !important;
+        max-width: calc(100% / var(--uw-srch-cols, 7)) !important;
+      }
+      /* 用户/媒体是横向卡（原生 1/3、约 669px 宽），容器变宽后必须重新分列，
+         否则每张会被拉到 1100px 以上、内容撑不满 */
+      ${SRCH} .media-list.row > *,
+      ${SRCH} .user-list.row > * {
+        flex: 0 0 calc(100% / var(--uw-srch-wide-cols, 3)) !important;
+        max-width: calc(100% / var(--uw-srch-wide-cols, 3)) !important;
+      }
     }
 
     /* ---------- 动态页 ---------- */
@@ -310,9 +317,9 @@
     set('--uw-pop-cols', Math.min(8, Math.max(2,
       Math.round((avail + POP_GAP) / (POPULAR_CARD_WIDTH + POP_GAP)))));
 
-    // 搜索页：视频卡沿用首页的目标宽度（两边卡片大小一致），横向卡按自己的原生宽度分列
-    set('--uw-srch-cols', Math.min(14, Math.max(2,
-      Math.round(avail / (TARGET_CARD_WIDTH + SRCH_GUTTER)))));
+    // 搜索页：保持它自己的原生卡片宽度，只把行里塞更多张（跟首页一样的原则，但基准值不同）
+    set('--uw-srch-cols', Math.min(16, Math.max(2,
+      Math.round(avail / (SRCH_CARD + SRCH_GUTTER)))));
     set('--uw-srch-wide-cols', Math.min(8, Math.max(1,
       Math.round(avail / SRCH_WIDE))));
 
