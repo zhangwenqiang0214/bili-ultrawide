@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.4.0
-// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流独占整行；播放页放大播放器并把评论区搬到右栏（顶掉弹幕列表和推荐列表）。
+// @version      1.5.0
+// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器并把评论区搬到右栏（顶掉弹幕列表和推荐列表）。
 // @author       zhangwenqiang0214
 // @license      MIT
 // @homepageURL  https://github.com/zhangwenqiang0214/bili-ultrawide
@@ -139,15 +139,12 @@
       padding-left: ${SIDE_PADDING}px !important;
       padding-right: ${SIDE_PADDING}px !important;
     }
-    /* 动态卡片高度参差不齐。这里用 grid 而不是 CSS 多列瀑布流：
-       多列布局在无限加载时会把已有卡片重新分配，正在看的内容会跳走；
-       grid 只往下加新行，上面的卡片不动。align-items:start 防止矮卡片被拉高。 */
-    ${DYN} .bili-dyn-list__items,
-    ${DYN} .bili-dyn-list:has(> .bili-dyn-list__item) {
-      display: grid !important;
-      grid-template-columns: repeat(var(--uw-dyn-cols, 1), minmax(0, 1fr)) !important;
-      gap: ${DYN_GAP}px !important;
-      align-items: start !important;
+    /* 动态卡片高度参差不齐，所以是瀑布流（每张卡紧跟上一张，不按横行对齐）。
+       位置由下面的 JS 算，这里只负责把容器变成定位参考系。
+       uw-masonry 这个类只由脚本加在正确的元素上，所以不需要页面类型守卫。 */
+    .uw-masonry { position: relative !important; display: block !important; }
+    .uw-masonry > .bili-dyn-list__item {
+      position: absolute !important; top: 0; left: 0; margin: 0 !important;
     }
     ${DYN} .bili-dyn-list__item { margin-bottom: 0 !important; }
 
@@ -256,17 +253,133 @@
       Math.round((avail + POP_GAP) / (POPULAR_CARD_WIDTH + POP_GAP)))));
 
     // 动态页：宽窗口下侧栏已经搬到顶部，整行都归动态流；窄窗口下要扣掉左右侧栏
-    const dynAvail = w >= DYN_WIDE ? avail : avail - DYN_SIDE;
-    const dynCols = Math.min(DYNAMIC_MAX_COLUMNS, Math.max(1,
-      Math.floor((dynAvail + DYN_GAP) / (DYN_CARD + DYN_GAP))));
-    set('--uw-dyn-cols', dynCols);
-    set('--uw-dyn-main', (dynCols * DYN_CARD + (dynCols - 1) * DYN_GAP) + 'px');
+    set('--uw-dyn-main', (dynColumns() * DYN_CARD + (dynColumns() - 1) * DYN_GAP) + 'px');
 
     // 播放页：播放器宽度取「视口高度放得下的最大 16:9」和「按比例分给播放器的宽度」中的小者，
     // 保证整个播放器一屏能看完，剩下的宽度全归评论区。
     set('--uw-player-w', Math.round(Math.min(
       (window.innerHeight - PLAY_RESERVE) * 16 / 9,
       avail * PLAYER_RATIO)) + 'px');
+  }
+
+  /* ---------- 动态页瀑布流 ---------- */
+  // 为什么自己算位置，而不用现成的两种 CSS 方案：
+  //   grid          → 行高由该行最高的卡片决定，矮卡片下面留一大块空洞（用户明确反对）
+  //   column-count  → 没有空洞，但无限加载时浏览器会把所有卡片重新分配到各列，
+  //                   正在看的内容会跳走
+  // 这里：每张新卡片放进当前最矮的那一列，已放好的卡片永不移动 —— 既没空洞，加载更多也不跳。
+  const M = {box: null, placed: [], heights: [], colW: 0, cols: 0, ro: null, mo: null, raf: 0, dirty: new Set()};
+
+  function dynColumns() {
+    const w = document.documentElement.clientWidth;
+    const avail = w - SIDE_PADDING * 2;
+    // 宽窗口下侧栏已搬到顶部，整行都归动态流；窄窗口下要扣掉左右侧栏
+    const feed = w >= DYN_WIDE ? avail : avail - DYN_SIDE;
+    return Math.min(DYNAMIC_MAX_COLUMNS, Math.max(1,
+      Math.floor((feed + DYN_GAP) / (DYN_CARD + DYN_GAP))));
+  }
+
+  const dynItems = () => M.box
+    ? [...M.box.children].filter(e => e.classList.contains('bili-dyn-list__item'))
+    : [];
+
+  function dynPlace(from) {
+    const list = dynItems();
+    for (let i = from; i < list.length; i++) {
+      const el = list[i];
+      let c = 0;
+      for (let j = 1; j < M.cols; j++) if (M.heights[j] < M.heights[c] - 0.5) c = j;
+      el.style.width = M.colW + 'px';
+      el.style.left = Math.round(c * (M.colW + DYN_GAP)) + 'px';
+      el.style.top = Math.round(M.heights[c]) + 'px';
+      el.dataset.uwCol = c;
+      M.heights[c] += el.getBoundingClientRect().height + DYN_GAP;
+      M.placed.push(el);
+      // border-box：卡片高度变化常常来自 padding 之类的非内容尺寸，默认的 content-box 收不到
+      M.ro.observe(el, {box: 'border-box'});
+    }
+    M.box.style.height = Math.round(Math.max(0, ...M.heights)) + 'px';
+  }
+
+  // 某张卡片高度变了（图片加载完、点了「展开」）：只把同一列里它下面的卡片重新码一遍，
+  // 其它列一个像素都不动。
+  function dynRestack(col) {
+    let y = 0;
+    M.placed.forEach(el => {
+      if (+el.dataset.uwCol !== col) return;
+      el.style.top = Math.round(y) + 'px';
+      y += el.getBoundingClientRect().height + DYN_GAP;
+    });
+    M.heights[col] = y;
+    M.box.style.height = Math.round(Math.max(0, ...M.heights)) + 'px';
+  }
+
+  function dynRelayout() {
+    M.placed = [];
+    M.heights = new Array(M.cols).fill(0);
+    M.ro.disconnect();
+    M.colW = (M.box.clientWidth - (M.cols - 1) * DYN_GAP) / M.cols;
+    dynPlace(0);
+  }
+
+  function dynClear() {
+    M.box.classList.remove('uw-masonry');
+    M.box.style.height = '';
+    dynItems().forEach(el => {
+      el.style.width = el.style.left = el.style.top = '';
+      delete el.dataset.uwCol;
+    });
+    M.placed = [];
+    M.ro.disconnect();
+  }
+
+  function dynApply() {
+    if (!M.box) return;
+    const cols = dynColumns();
+    if (cols <= 1) { M.cols = 1; dynClear(); return; } // 单列就交还给原生流式布局
+    M.cols = cols;
+    M.box.classList.add('uw-masonry');
+    dynRelayout();
+  }
+
+  // DOM 变了：末尾追加就只排新增的（老卡片不动）；出现插队/删除/整体刷新则全量重排
+  function dynSync() {
+    const list = dynItems();
+    if (!M.box.classList.contains('uw-masonry')) return;
+    let appendOnly = list.length >= M.placed.length;
+    if (appendOnly) {
+      for (let i = 0; i < M.placed.length; i++) {
+        if (list[i] !== M.placed[i]) { appendOnly = false; break; }
+      }
+    }
+    if (!appendOnly) dynRelayout();
+    else if (list.length > M.placed.length) dynPlace(M.placed.length);
+  }
+
+  function setupMasonry() {
+    const box = document.querySelector('.bili-dyn-list__items');
+    if (!box) return false;
+    M.box = box;
+    if (!M.ro) {
+      M.ro = new ResizeObserver(entries => {
+        entries.forEach(en => {
+          const c = en.target.dataset.uwCol;
+          if (c !== undefined) M.dirty.add(+c);
+        });
+        // 攒到下一帧再重排：图片批量加载时会有几十个回调，逐个重排会抖
+        if (!M.raf) M.raf = requestAnimationFrame(() => {
+          M.raf = 0;
+          const cols = [...M.dirty]; M.dirty.clear();
+          cols.forEach(dynRestack);
+        });
+      });
+    }
+    if (!M.mo) {
+      M.mo = new MutationObserver(dynSync);
+      M.mo.observe(box, {childList: true});
+    }
+    dynApply();
+    return true;
   }
 
   // 播放页需要一次 DOM 搬运：评论区在左栏里面，纯 CSS 没法把它挪到右栏
@@ -300,11 +413,17 @@
   }
 
   applyColumns();
-  addEventListener('resize', applyColumns, { passive: true });
+  addEventListener('resize', () => { applyColumns(); dynApply(); }, { passive: true });
 
-  if (!setupPlayPage()) {
-    // 轮询而不是全页 MutationObserver：播放页 DOM 变动极其频繁，全量监听不划算
-    const iv = setInterval(() => { if (setupPlayPage()) clearInterval(iv); }, 200);
+  // 播放页和动态页都要等元素出现。轮询而不是全页 MutationObserver：
+  // 播放页 DOM 变动极其频繁，全量监听不划算。
+  let playOk = setupPlayPage(), dynOk = setupMasonry();
+  if (!playOk || !dynOk) {
+    const iv = setInterval(() => {
+      if (!playOk) playOk = setupPlayPage();
+      if (!dynOk) dynOk = setupMasonry();
+      if (playOk && dynOk) clearInterval(iv);
+    }, 200);
     setTimeout(() => clearInterval(iv), 30000);
   }
 })();
