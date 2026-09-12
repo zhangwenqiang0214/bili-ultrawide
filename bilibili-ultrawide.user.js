@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.7.0
-// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器、把评论区搬到右栏（顶掉弹幕列表和推荐列表），并把播放器钉住——滚评论时视频不动。
+// @version      1.8.0
+// @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；搜索页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器、把评论区搬到右栏（顶掉弹幕列表和推荐列表），并把播放器钉住——滚评论时视频不动。
 // @author       zhangwenqiang0214
 // @license      MIT
 // @homepageURL  https://github.com/zhangwenqiang0214/bili-ultrawide
@@ -57,6 +57,8 @@
   const DYN_WIDE  = 1700; // 窗口宽于这个值，动态页才把侧栏收成顶部信息条
   const PLAY_WIDE = 2600; // 窗口宽于这个值，播放页才重排（窄屏保持 B站 原样更好用）
   const PLAY_GAP  = 24;   // 播放页 播放器和评论区之间的间距
+  const SRCH_GUTTER = 16;  // 搜索页每格左右各 8px 内边距
+  const SRCH_WIDE   = 680; // 搜索页「用户/媒体」那种横向卡的原生宽度
   const PLAY_TOP  = 64;   // 顶栏高度，左栏钉住时的吸顶位置
   const PLAY_MIN_W = 640; // 播放器宽度下限，避免极端情况下被压得太小
   // 左栏只留这三样，其余（简介/标签/广告/评论）搬到右栏 —— 左栏总高必须塞进一屏才钉得住
@@ -69,6 +71,7 @@
   const CHAN = 'html:has(#app > .feedchannel)';             // 分区页 /c/xxx/
   const POP  = 'html:has(#app > .popular-container)';       // 热门页 /v/popular/*
   const DYN  = 'html:has(#app > [class^="bili-dyn-home"])'; // 动态页 t.bilibili.com
+  const SRCH = 'html:has(#app > .search-layout)';           // 搜索页 search.bilibili.com
   const HOME = `${DYN} [class^="bili-dyn-home"]`;
 
   const css = `
@@ -76,6 +79,7 @@
     #app:has(> .bili-feed4),
     #app:has(> .feedchannel),
     #app:has(> .popular-container),
+    #app:has(> .search-layout),
     #app:has(> [class^="bili-dyn-home"]) { max-width: none !important; }
 
     /* 顶栏：只要页面上有这个顶栏就拉满，不按页面类型限定 —— 播放页、动态页、搜索页等都吃这条。
@@ -159,6 +163,26 @@
     ${POP} .rank-list .rank-item {
       width: calc((100% - (var(--uw-pop-cols, 2) - 1) * ${POP_GAP}px) / var(--uw-pop-cols, 2)) !important;
       margin-right: 0 !important;
+    }
+
+    /* ---------- 搜索页 ---------- */
+    /* 所有标签页（综合/视频/番剧/影视/直播/专栏/用户）的外层都是 .i_wrapper，统一卡 2200px，一条就够 */
+    ${SRCH} .i_wrapper {
+      max-width: none !important;
+      padding-left: ${SIDE_PADDING}px !important;
+      padding-right: ${SIDE_PADDING}px !important;
+    }
+    /* 视频卡栅格：原生每格写死 1/7（col_xl_1_7 → max-width:14.28%），改成按目标卡片宽度算列数 */
+    ${SRCH} .video-list.row > * {
+      flex: 0 0 calc(100% / var(--uw-srch-cols, 7)) !important;
+      max-width: calc(100% / var(--uw-srch-cols, 7)) !important;
+    }
+    /* 用户/媒体是横向卡（原生 1/3、约 669px 宽），容器变宽后必须重新分列，
+       否则每张会被拉到 1100px 以上、内容撑不满 */
+    ${SRCH} .media-list.row > *,
+    ${SRCH} .user-list.row > * {
+      flex: 0 0 calc(100% / var(--uw-srch-wide-cols, 3)) !important;
+      max-width: calc(100% / var(--uw-srch-wide-cols, 3)) !important;
     }
 
     /* ---------- 动态页 ---------- */
@@ -285,6 +309,12 @@
 
     set('--uw-pop-cols', Math.min(8, Math.max(2,
       Math.round((avail + POP_GAP) / (POPULAR_CARD_WIDTH + POP_GAP)))));
+
+    // 搜索页：视频卡沿用首页的目标宽度（两边卡片大小一致），横向卡按自己的原生宽度分列
+    set('--uw-srch-cols', Math.min(14, Math.max(2,
+      Math.round(avail / (TARGET_CARD_WIDTH + SRCH_GUTTER)))));
+    set('--uw-srch-wide-cols', Math.min(8, Math.max(1,
+      Math.round(avail / SRCH_WIDE))));
 
     // 动态页：宽窗口下侧栏已经搬到顶部，整行都归动态流；窄窗口下要扣掉左右侧栏
     set('--uw-dyn-main', (dynColumns() * DYN_CARD + (dynColumns() - 1) * DYN_GAP) + 'px');
