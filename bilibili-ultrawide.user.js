@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         哔哩哔哩宽屏适配（带鱼屏）
 // @namespace    https://github.com/zhangwenqiang/bili-ultrawide
-// @version      1.8.0
+// @version      1.8.1
 // @description  B站把内容区宽度写死了，超宽屏左右会白白空掉一大半。本脚本解除宽度上限并按窗口宽度自动算列数。首页/分区页多列；热门页多列；搜索页多列；动态页把左右侧栏收成顶部信息条、动态流瀑布流多列；播放页放大播放器、把评论区搬到右栏（顶掉弹幕列表和推荐列表），并把播放器钉住——滚评论时视频不动。
 // @author       zhangwenqiang0214
 // @license      MIT
@@ -9,9 +9,8 @@
 // @supportURL   https://github.com/zhangwenqiang0214/bili-ultrawide/issues
 // @downloadURL  https://raw.githubusercontent.com/zhangwenqiang0214/bili-ultrawide/main/bilibili-ultrawide.user.js
 // @updateURL    https://raw.githubusercontent.com/zhangwenqiang0214/bili-ultrawide/main/bilibili-ultrawide.user.js
-// @match        *://www.bilibili.com/*
+// @match        *://*.bilibili.com/*
 // @match        *://bilibili.com/*
-// @match        *://t.bilibili.com/*
 // @run-at       document-start
 // @grant        none
 // @noframes
